@@ -3,13 +3,27 @@ package  org.jfrog.build.sbtplugin
 import sbt._
 import sbt.Keys._
 import org.jfrog.build.client.ArtifactoryClientConfiguration
-import org.jfrog.build.api.util.NullLog
+import org.jfrog.build.api.{
+	Module,
+	Build,
+	Artifact,
+	Dependency
+}
+import org.jfrog.build.api.util.{
+	NullLog,
+	DeployableFile
+}
 
 object ArtifactoryKeys {
 	val artifactory = settingKey[ArtifactoryClientConfiguration]("An api to collect/store published artifact information.")
-	val artifactoryRecordInfo = taskKey[String]("")
+	val artifactoryRecordInfo = taskKey[ArtifactoryModule]("")
 	val artifactoryPublish = taskKey[Unit]("publishing all files to artifactory.")
 }
+
+case class ArtifactoryModule(
+	module: Module,
+	deployableFiles: Seq[DeployableFile]
+)
 
 import ArtifactoryKeys._
 object ArtifactoryPlugin extends AutoPlugin {
@@ -35,7 +49,7 @@ object ArtifactoryPlugin extends AutoPlugin {
         	val info = projectID.value
         	// TODO - Fill out stuff on artifactory
         	println(s"RECORDING INFO FOR ${info}")
-        	info.toString
+        	ArtifactoryModule(null, Nil)
         },
         artifactoryPublish := (artifactoryPublish in Global).value,
         aggregate in artifactoryPublish := false

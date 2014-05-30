@@ -6,7 +6,8 @@ version := "1.0-SNAPSHOT"
 
 sbtPlugin := true
 
-resolvers += "jcenter" at "http://jcenter.bintray.com/"
+resolvers := 
+ ("jcenter" at "http://jcenter.bintray.com/") :: Nil
 
 libraryDependencies +=
   "org.jfrog.buildinfo" % "build-info-extractor" % "2.2.7"

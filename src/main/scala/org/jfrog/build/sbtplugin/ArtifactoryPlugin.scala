@@ -13,14 +13,23 @@ import ArtifactoryKeys._
 object ArtifactoryPlugin extends AutoPlugin {
 	override def trigger = allRequirements
 	override def requires = sbt.plugins.IvyPlugin
+	val autoImport = ArtifactoryKeys
 
 
 	override def projectSettings: Seq[Setting[_]] = 
 	  Seq(
+	  	publishTo := {
+	  		val config = artifactoryClientConfiguration.value
+	  		Some("foo" at "bar")
+	  	}
 	  )
 
 	override def globalSettings: Seq[Setting[_]] =
 	  Seq(
-	  	artifactoryClientConfiguration := new ArtifactoryClientConfiguration(new NullLog)
+	  	artifactoryClientConfiguration := {
+	  		val config = new ArtifactoryClientConfiguration(new NullLog)
+	  		//config.
+	  		config
+	  	}
 	  )
 }

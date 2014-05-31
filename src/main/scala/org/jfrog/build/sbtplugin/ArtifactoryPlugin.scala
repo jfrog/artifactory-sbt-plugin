@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2014 JFrog Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package  org.jfrog.build.sbtplugin
 
 import sbt._
@@ -20,74 +35,36 @@ object ArtifactoryKeys {
 	val artifactoryPublish = taskKey[Unit]("publishing all files to artifactory.")
 }
 
-case class ArtifactoryModule(
-	module: Module,
-	deployableFiles: Seq[DeployableFile]
-)
-
 import ArtifactoryKeys._
 object ArtifactoryPlugin extends AutoPlugin {
 	override def trigger = allRequirements
 	override def requires = sbt.plugins.IvyPlugin
 	val autoImport = ArtifactoryKeys
 
-
 	override def projectSettings: Seq[Setting[_]] = 
 	  Seq(
-	  	// TODO - override publishTo with the artifactory config to push aritfacts into
-	  	// TODO - override resolvers with a resolver which can pull from artifactory
-        // TODO - attach hooks to publish so we can generate JSON
         resolvers := {
-        	defineResolvers(artifactory.value.resolver) match {
+        	SbtExtractor.defineResolvers(artifactory.value.resolver) match {
         		case Nil => resolvers.value
         		case stuff => stuff
         	} 
         },
         artifactoryRecordInfo :=  {
-        	val arts = packagedArtifacts.value
-        	val deps = update.value
-        	val info = projectID.value
-        	// TODO - Fill out stuff on artifactory
-        	println(s"RECORDING INFO FOR ${info}")
-        	ArtifactoryModule(null, Nil)
+        	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value)
         },
         artifactoryPublish := (artifactoryPublish in Global).value,
         aggregate in artifactoryPublish := false
-
 	  )
-
-	def defineResolvers(resolverConf: ArtifactoryClientConfiguration#ResolverHandler): Seq[Resolver] = {
-		val url = resolverConf.getUrl
-		import org.apache.commons.lang.StringUtils
-		if(StringUtils.isNotBlank(url)) {
-			def betterUrl = resolverConf.urlWithMatrixParams(url)
-			def mavenRepo = 
-			  if(resolverConf.isMaven) Seq("artifactory-maven-resolver" at betterUrl)
-			  else Nil
-			def ivyRepo =
-			  if(resolverConf.isIvyRepositoryDefined) {
-			  	Seq(
-			  	  Resolver.url("artifactory-ivy-resolver", sbt.url(betterUrl))(Patterns(resolverConf.getIvyArtifactPattern))
-			  	)
-			  } else Nil
-			mavenRepo ++ ivyRepo
-		}
-		else Seq.empty
-	}
 
 	override def globalSettings: Seq[Setting[_]] =
 	  Seq(
 	  	artifactory := {
 	  		val config = new ArtifactoryClientConfiguration(new NullLog)
-	  		//config.
+        config.info.setBuildStarted(System.currentTimeMillis())
 	  		config
 	  	},
 	  	artifactoryPublish := {
-	  		// Ignore this result, just declare a dependency on all the 
-	  		// record tasks.
-	  		val allInfoIsRecorded = recordAllTasksEverywhere.value 
-	  		// Publish
-	  		println(s"PUBLISHING ${allInfoIsRecorded mkString "\n"}!")
+	  		SbtExtractor.publish(streams.value.log, artifactory.value, recordAllTasksEverywhere.value)
 	  	}
 	  )
 
@@ -97,6 +74,7 @@ object ArtifactoryPlugin extends AutoPlugin {
    	  val refs = buildStructure.value.allProjectRefs
    	  joinAllExistingTasks(refs, artifactoryRecordInfo)
    }
+
    // Joins all tasks in a project, returns the results in a sequence.
    // If a project does not have a task, that project's task result does not show up in
    // the seuqence.
@@ -115,6 +93,4 @@ object ArtifactoryPlugin extends AutoPlugin {
    	 	}
    	 }
    }
-
-
 }

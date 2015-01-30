@@ -17,7 +17,7 @@ package org.jfrog.build.sbtplugin
 
 import org.jfrog.build.client.ArtifactoryClientConfiguration
 import org.jfrog.build.client.DeployDetails  //Provides details for deployment
-import org.jfrog.build.api.util.FileChecksumCalculator //TODO: We will need this for deploy details creation
+import org.jfrog.build.api.util.FileChecksumCalculator
 import sbt._
 import org.jfrog.build.api.Module  //Contains build module information
 //import org.jfrog.build.api.util.DeployableFile  //markg: This would be a good way to do it, but build-info doesn't yet implement
@@ -51,13 +51,32 @@ object SbtExtractor {
   }
 
   def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID): ArtifactoryModule = {
-    // TODO - Fill out stuff on artifactory
     log.info(s"BuildInfo: extracting info for module $moduleId")
-    log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
+  //TODO - figure out what to do with report
   //  log.info(s"ArtifactoryPluginInfo report: ${report}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
-    ArtifactoryModule(module, Nil)
+    ArtifactoryModule(module, createDeployDetailsSeq(log, artifacts))
   }
+
+  def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File]): Seq[DeployDetails] = {
+    // TODO - Figure out targetRepo
+    // TODO - Figure out what to do with extra file metadata.  Properties?
+    log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
+    def tempSeqDD: Seq[DeployDetails] = Seq.empty
+    if(artifacts.nonEmpty) {
+      for (f <- artifacts.values) {
+        log.info(s"ArtifactoryPlugInfo File: $f")
+        val checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
+        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository("MarkTestTarget").artifactPath(s"$f").
+          md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
+        log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
+          s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
+        tempSeqDD :+ tempDD
+      }
+    }
+    tempSeqDD
+  }
+
 
   def publish(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, modules: Seq[ArtifactoryModule]): Unit = {
     // Publish

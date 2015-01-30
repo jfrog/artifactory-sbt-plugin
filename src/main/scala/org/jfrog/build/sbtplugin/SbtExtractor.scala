@@ -16,9 +16,11 @@
 package org.jfrog.build.sbtplugin
 
 import org.jfrog.build.client.ArtifactoryClientConfiguration
+import org.jfrog.build.client.DeployDetails  //Provides details for deployment
+import org.jfrog.build.api.util.FileChecksumCalculator //TODO: We will need this for deploy details creation
 import sbt._
-import org.jfrog.build.api.Module
-import org.jfrog.build.api.util.DeployableFile
+import org.jfrog.build.api.Module  //Contains build module information
+//import org.jfrog.build.api.util.DeployableFile  //markg: This would be a good way to do it, but build-info doesn't yet implement
 import java.io.File
 import org.jfrog.build.api.builder.ModuleBuilder
 import org.jfrog.build.extractor.BuildInfoExtractorUtils.getModuleIdString
@@ -66,6 +68,6 @@ object SbtExtractor {
 
 case class ArtifactoryModule(
                               module: Module,
-                              deployableFiles: Seq[DeployableFile]
+                              deployableFiles: Seq[DeployDetails]
                               )
 

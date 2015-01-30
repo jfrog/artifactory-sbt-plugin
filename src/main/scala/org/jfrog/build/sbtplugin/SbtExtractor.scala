@@ -25,6 +25,7 @@ import org.jfrog.build.extractor.BuildInfoExtractorUtils.getModuleIdString
 
 /**
  * @author freds
+ * @author markg
  */
 object SbtExtractor {
 
@@ -50,6 +51,8 @@ object SbtExtractor {
   def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID): ArtifactoryModule = {
     // TODO - Fill out stuff on artifactory
     log.info(s"BuildInfo: extracting info for module ${moduleId}")
+    log.info(s"ArtifactoryPluginInfo Artifacts: ${artifacts}")
+  //  log.info(s"ArtifactoryPluginInfo report: ${report}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
     ArtifactoryModule(module, Nil)
   }

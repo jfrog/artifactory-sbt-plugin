@@ -1,0 +1,10 @@
+//If using the plugin as a universal plugin in SBT you put this file in the .sbt/0.13/plugins
+//directory with correct info.  If not, rename this to plugins.sbt and place in your project
+
+//Replace .. with correct path to file
+lazy val sbtArtifactory = RootProject(file("..").toURI)
+
+lazy val buildProject = (
+  project.in(file(".")).
+  dependsOn(sbtArtifactory)
+)

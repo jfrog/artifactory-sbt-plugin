@@ -31,7 +31,7 @@ import org.jfrog.build.api.util.{
 
 object ArtifactoryKeys {
 	val artifactory = settingKey[ArtifactoryClientConfiguration]("An api to collect/store published artifact information.")
-	val artifactoryRecordInfo = taskKey[ArtifactoryModule]("")
+	val artifactoryRecordInfo = taskKey[ArtifactoryModule]("") //TODO: provide a description of this
 	val artifactoryPublish = taskKey[Unit]("publishing all files to artifactory.")
 }
 
@@ -47,7 +47,7 @@ object ArtifactoryPlugin extends AutoPlugin {
         	SbtExtractor.defineResolvers(artifactory.value.resolver) match {
         		case Nil => resolvers.value
         		case stuff => stuff
-        	} 
+        	} //TODO: I believe this doesn't yet do anything because we never define the artifactory.resolvers
         },
         artifactoryRecordInfo :=  {
         	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value)
@@ -59,7 +59,7 @@ object ArtifactoryPlugin extends AutoPlugin {
 	override def globalSettings: Seq[Setting[_]] =
 	  Seq(
 	  	artifactory := {
-	  		val config = new ArtifactoryClientConfiguration(new NullLog)
+	  		val config = new ArtifactoryClientConfiguration(new NullLog) //TODO: is NullLog really acceptable here?  If we had a project, this would be set with an IvyBuildInfoLog as per Ivy-extractor what about the report?
         config.info.setBuildStarted(System.currentTimeMillis())
 	  		config
 	  	},
@@ -71,7 +71,8 @@ object ArtifactoryPlugin extends AutoPlugin {
    //  A dynamic task which looks up the artifactoryRecordInfo task on ALL
    //  possible projects and joins the results together.
    lazy val recordAllTasksEverywhere = Def.taskDyn {
-   	  val refs = buildStructure.value.allProjectRefs
+   	  val refs = buildStructure.value.allProjectRefs  //It seems like possibly this line builds the pom file?
+      //TODO: if we have a POM file should we be basing this on IVY or Maven?  what is the build structure like?
    	  joinAllExistingTasks(refs, artifactoryRecordInfo)
    }
 

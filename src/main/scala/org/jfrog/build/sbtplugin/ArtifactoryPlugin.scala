@@ -50,7 +50,7 @@ object ArtifactoryPlugin extends AutoPlugin {
         	} //TODO: I believe this doesn't yet do anything because we never define the artifactory.resolvers
         },
         artifactoryRecordInfo :=  {
-        	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value)
+        	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value, artifactory.value)
         },
         artifactoryPublish := (artifactoryPublish in Global).value,
         aggregate in artifactoryPublish := false

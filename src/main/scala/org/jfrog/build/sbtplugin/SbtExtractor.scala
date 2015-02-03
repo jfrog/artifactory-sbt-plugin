@@ -15,6 +15,7 @@
  */
 package org.jfrog.build.sbtplugin
 
+import org.apache.ivy.core.IvyPatternHelper
 import org.jfrog.build.client.ArtifactoryClientConfiguration
 import org.jfrog.build.client.DeployDetails
 import org.jfrog.build.extractor.BuildInfoExtractorUtils
@@ -28,6 +29,9 @@ import java.io.File
 import org.jfrog.build.api.builder.ModuleBuilder
 import org.jfrog.build.extractor.BuildInfoExtractorUtils.getModuleIdString
 import java.util.Properties
+//import org.jfrog.build.util.IvyResolverHandler
+import org.apache.ivy.core.IvyPatternHelper
+import scala.collection.JavaConversions
 
 /**
  * @author freds
@@ -55,25 +59,32 @@ object SbtExtractor {
     else Seq.empty
   }
 
-  def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID): ArtifactoryModule = {
+  def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID,
+                    configuration: ArtifactoryClientConfiguration): ArtifactoryModule = {
     log.info(s"BuildInfo: extracting info for module $moduleId")
   //TODO - figure out what to do with report, is this the build-info log?
   //  log.info(s"ArtifactoryPluginInfo report: ${report}")
+    log.info(s"Org: ${moduleId.organization} name: ${moduleId.name} rev: ${moduleId.revision}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
-    ArtifactoryModule(module, createDeployDetailsSeq(log, artifacts))
+    ArtifactoryModule(module, createDeployDetailsSeq(log, artifacts, configuration, moduleId))
   }
 
-  def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File]): Seq[DeployDetails] = {
+  def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File],
+                             configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): Seq[DeployDetails] = {
     // TODO - Figure out targetRepo
     // TODO - Figure out what to do with extra file metadata.  Properties?
     // TODO - need to add build info fields, as per buildDeployDetails
     log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
     def tempSeqDD: Seq[DeployDetails] = Seq.empty
     if(artifacts.nonEmpty) {
-      for (f <- artifacts.values) {
+      for (artf <- artifacts.keys) {
+        def fopt: Option[File] = artifacts.get(artf)
+        def f: File = fopt.get
         log.info(s"ArtifactoryPlugInfo File: $f")
         val checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
-        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository("MarkTestTarget").artifactPath(s"$f").
+        val myPath = calculateArtifactPath(configuration.publisher, moduleId, artf)
+        //val myPath = s"$f"
+        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository("MarkTestTarget").artifactPath(myPath).
           md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
         log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
           s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
@@ -198,6 +209,44 @@ object SbtExtractor {
     log.info(s"ACC Info Prefix: ${configuration.info.getPrefix}")
   }
 
+  def calculateArtifactPath (publisher: ArtifactoryClientConfiguration#PublisherHandler, moduleId: ModuleID, artf: Artifact): String = {
+    //attributes: Map[String, String], extraAttributes: Map[String, String]
+    var organization: String = moduleId.organization
+    val revision: String = moduleId.revision
+    val moduleName: String = moduleId.name
+    val ext: String = artf.extension
+    val artfType: String = artf.`type`
+    val branch = s"markg-dev-branch-dummy"
+    val artifactPattern: String = getPattern(publisher, artfType)
+    val conf = s"dummyRELEASE"
+    if (publisher.isM2Compatible) {
+      organization = organization.replace(".", "/")
+    }
+    IvyPatternHelper.substitute(artifactPattern, organization, moduleName, revision, artf.name, artfType, ext)
+ //   IvyPatternHelper.substitute(artifactPattern, organization, moduleName, branch, revision, artf.name, artfType, ext, conf, null, JavaConversions.mapAsJavaMap(artf.extraAttributes), null)
+    //TODO: Everything in the pattern is addressed except classifier.  Doesn't appear to be a use of classifier in the main ivy extractor either
+    //substitute(artifactPattern, organization, moduleName, branch, revision, artf.name, artfType, ext, artf.configurations, null, artf.extraAttributes, null)
+  }
+
+  def getPattern(pub: ArtifactoryClientConfiguration#PublisherHandler, typestring: String): String = {
+    if (isIvy(typestring) )
+    {
+      pub.getIvyPattern
+    } else
+    {
+      pub.getIvyArtifactPattern
+    }
+  }
+
+  def isIvy(typestring: String): Boolean = {
+    if (typestring.isEmpty)
+    {
+      false
+    }
+    else {
+      typestring.equals(s"Ivy")
+    }
+  }
 }
 
 case class ArtifactoryModule(

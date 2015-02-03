@@ -10,4 +10,7 @@ resolvers :=
  ("jcenter" at "http://jcenter.bintray.com/") :: Nil
 
 libraryDependencies +=
-  "org.jfrog.buildinfo" % "build-info-extractor" % "2.3.3"
+  "org.jfrog.buildinfo" % "build-info-extractor" % "latest.release"
+
+libraryDependencies +=
+  "org.jfrog.buildinfo" % "build-info-extractor-ivy" % "latest.release"

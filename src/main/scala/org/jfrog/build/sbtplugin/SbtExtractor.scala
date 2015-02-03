@@ -15,7 +15,8 @@
  */
 package org.jfrog.build.sbtplugin
 
-import org.apache.ivy.core.IvyPatternHelper
+
+import org.apache.ivy.Ivy
 import org.jfrog.build.client.ArtifactoryClientConfiguration
 import org.jfrog.build.client.DeployDetails
 import org.jfrog.build.extractor.BuildInfoExtractorUtils
@@ -40,7 +41,6 @@ import scala.collection.JavaConversions
 object SbtExtractor {
 
   def defineResolvers(resolverConf: ArtifactoryClientConfiguration#ResolverHandler): Seq[Resolver] = {
-    //TODO: I am pretty sure that at this point resolverConf.getUrl is always going to return null, so this function does nothing.  Need to fix?
     val url = resolverConf.getUrl
     import org.apache.commons.lang.StringUtils
     if (StringUtils.isNotBlank(url)) {
@@ -130,7 +130,7 @@ object SbtExtractor {
     log.info(s"ACC Resolver isMaven: ${configuration.resolver.isMaven}")
     log.info(s"ACC Resolver values:")
     log.info(s"ACC Resolver BuildRoot: ${configuration.resolver.getBuildRoot}")
-//    log.info(s"ACC Resolver ContextURL: ${configuration.resolver.getContextUrl}") //TODO: Got a java lang exception that this is undefined is this okay?
+    log.info(s"ACC Resolver ContextURL: ${configuration.resolver.getContextUrl}") //TODO: this needs to be defined in build.sbt as per readme, should we do something with initialization?
     log.info(s"ACC Resolver DownloadSnapshotRepoKey: ${configuration.resolver.getDownloadSnapshotRepoKey}")
     log.info(s"ACC Resolver DownloadURL: ${configuration.resolver.getDownloadUrl}")
     log.info(s"ACC Resolver MatrixParamPrefix: ${configuration.resolver.getMatrixParamPrefix}")
@@ -162,7 +162,7 @@ object SbtExtractor {
     log.info(s"ACC Publisher AggregateArtifacts: ${configuration.publisher.getAggregateArtifacts}")
     log.info(s"ACC Publisher ArtifactSpecs: ${configuration.publisher.getArtifactSpecs}")
     log.info(s"ACC Publisher BuildRoot: ${configuration.publisher.getBuildRoot}")
-//    log.info(s"ACC Publisher ContextURL: ${configuration.publisher.getContextUrl}") //TODO: Got a java lang exception that this is undefined is this okay?
+    log.info(s"ACC Publisher ContextURL: ${configuration.publisher.getContextUrl}") //TODO: this needs to be defined in build.sbt as per readme, should we do something with initialization?
     log.info(s"ACC Publisher getExcludePatterns: ${configuration.publisher.getExcludePatterns}")
     log.info(s"ACC Publisher getIncludePatterns: ${configuration.publisher.getIncludePatterns}")
     log.info(s"ACC Publisher MatrixParamPrefix: ${configuration.publisher.getMatrixParamPrefix}")

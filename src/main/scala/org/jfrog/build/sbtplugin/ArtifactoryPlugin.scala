@@ -47,7 +47,7 @@ object ArtifactoryPlugin extends AutoPlugin {
         	SbtExtractor.defineResolvers(artifactory.value.resolver) match {
         		case Nil => resolvers.value
         		case stuff => stuff
-        	} //TODO: I believe this doesn't yet do anything because we never define the artifactory.resolvers
+        	}
         },
         artifactoryRecordInfo :=  {
         	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value, artifactory.value)

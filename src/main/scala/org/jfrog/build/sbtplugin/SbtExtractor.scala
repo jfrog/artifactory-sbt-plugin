@@ -65,7 +65,12 @@ object SbtExtractor {
   //  log.info(s"ArtifactoryPluginInfo report: ${report}")
     log.info(s"Org: ${moduleId.organization} name: ${moduleId.name} rev: ${moduleId.revision}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
-    ArtifactoryModule(module, createDeployDetailsSeq(log, artifacts, configuration, moduleId))
+    val ddSeq: Seq[DeployDetails] = createDeployDetailsSeq(log, artifacts, configuration, moduleId)
+    val aModule: ArtifactoryModule = new ArtifactoryModule(module, ddSeq)
+    if(aModule.deployableFiles.isEmpty)
+      log.info(s"DeployableFiles is Empty")
+    else log.info(s"DeployableFiles is not Empty")
+    aModule
   }
 
   def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File],
@@ -74,7 +79,7 @@ object SbtExtractor {
     // TODO - Figure out what to do with extra file metadata.  Properties?
     // TODO - need to add build info fields, as per buildDeployDetails
     log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
-    def tempSeqDD: Seq[DeployDetails] = Seq.empty
+    var tempSeqDD: Seq[DeployDetails] = Seq.empty
     if(artifacts.nonEmpty) {
       for (artf <- artifacts.keys) {
         def fopt: Option[File] = artifacts.get(artf)
@@ -87,7 +92,7 @@ object SbtExtractor {
           md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
         log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
           s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
-        tempSeqDD :+ tempDD
+        tempSeqDD = tempSeqDD :+ tempDD
       }
     }
     tempSeqDD
@@ -110,6 +115,9 @@ object SbtExtractor {
     log.info(s"BuildInfo: Publishing based on ABIC ${myABIC.toString}")
     for(module <- modules) {
       log.info(s"BuildInfo: Publishing Module ${module.module.getId}")
+      if(module.deployableFiles.isEmpty)
+        log.info(s"DeployableFiles is Empty")
+      else log.info(s"DeployableFiles is not Empty")
       for(detail <- module.deployableFiles) {
         myABIC.deployArtifact(detail)
         log.info(s"BuildInfo: Publishing Detail ${detail.getArtifactPath}")

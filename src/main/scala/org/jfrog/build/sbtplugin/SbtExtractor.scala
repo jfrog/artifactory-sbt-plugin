@@ -17,8 +17,7 @@ package org.jfrog.build.sbtplugin
 
 
 import org.apache.ivy.Ivy
-import org.jfrog.build.client.ArtifactoryClientConfiguration
-import org.jfrog.build.client.DeployDetails
+import org.jfrog.build.client.{ArtifactoryBuildInfoClient, ArtifactoryClientConfiguration, DeployDetails}
 import org.jfrog.build.extractor.BuildInfoExtractorUtils
 
 //Provides details for deployment
@@ -84,7 +83,7 @@ object SbtExtractor {
         val checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
         val myPath = calculateArtifactPath(configuration.publisher, moduleId, artf)
         //val myPath = s"$f"
-        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository("MarkTestTarget").artifactPath(myPath).
+        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository(configuration.publisher.getRepoKey).artifactPath(myPath).
           md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
         log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
           s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
@@ -97,9 +96,25 @@ object SbtExtractor {
 
   def publish(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, modules: Seq[ArtifactoryModule]): Unit = {
     // Publish
+    //TODO: Compare with build-info-extractor-ivy ArtifactoryBuildListener.doDeploy() some configs are still not present (such as blackduck integration)
     val myACC = makeACC(log, configuration)
     printACC(log, myACC)
+    val contextUrl = myACC.publisher.getContextUrl();
+    val username = myACC.publisher.getUsername();
+    val password = myACC.publisher.getPassword();
     log.info(s"BuildInfo: Publishing ${modules.map (_.module.getId) mkString ", "}")
+    val myABIC: ArtifactoryBuildInfoClient = new ArtifactoryBuildInfoClient(contextUrl, username, password, myACC.getLog)
+    //TODO: skipping checks on isPublishArtifacts and isPublishBuildInfo we will assume they are true for now
+    //TODO: Haven't really created a buildinfo yet, need to do that.
+    //TODO: for now, skipping include/exclude patterns
+    log.info(s"BuildInfo: Publishing based on ABIC ${myABIC.toString}")
+    for(module <- modules) {
+      log.info(s"BuildInfo: Publishing Module ${module.module.getId}")
+      for(detail <- module.deployableFiles) {
+        myABIC.deployArtifact(detail)
+        log.info(s"BuildInfo: Publishing Detail ${detail.getArtifactPath}")
+      }
+    }
   }
 
   def makeACC(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): ArtifactoryClientConfiguration = {

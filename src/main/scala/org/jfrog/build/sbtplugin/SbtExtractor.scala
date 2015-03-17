@@ -61,8 +61,9 @@ object SbtExtractor {
   def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID,
                     configuration: ArtifactoryClientConfiguration): ArtifactoryModule = {
     log.info(s"BuildInfo: extracting info for module $moduleId")
-  //TODO - figure out what to do with report, is this the build-info log?
+  //TODO - UpdateReport contains the full graph, much more detailed than the POM, need from it.
   //  log.info(s"ArtifactoryPluginInfo report: ${report}")
+    //report.configurations //configuration.details has the new model
     log.info(s"Org: ${moduleId.organization} name: ${moduleId.name} rev: ${moduleId.revision}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
     val ddSeq: Seq[DeployDetails] = createDeployDetailsSeq(log, artifacts, configuration, moduleId)
@@ -75,7 +76,6 @@ object SbtExtractor {
 
   def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File],
                              configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): Seq[DeployDetails] = {
-    // TODO - Figure out targetRepo
     // TODO - Figure out what to do with extra file metadata.  Properties?
     // TODO - need to add build info fields, as per buildDeployDetails
     log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
@@ -226,7 +226,7 @@ object SbtExtractor {
     log.info(s"ACC Info Principal: ${configuration.info.getPrincipal}")
     log.info(s"ACC Info ReleaseComment: ${configuration.info.getReleaseComment}")
     log.info(s"ACC Info RunParameters: ${configuration.info.getRunParameters}")
-    log.info(s"ACC Info VcsRevision: ${configuration.info.getVcsRevision}")
+    log.info(s"ACC Info VcsRevision: ${configuration.info.getVcsRevision}") //TODO: get this from the gitPlugin, will need a second plugin to write just this info when gitPlugin is present
     log.info(s"ACC Info VcsUrl: ${configuration.info.getVcsUrl}")
     log.info(s"ACC Info Log: ${configuration.info.getLog}")
     log.info(s"ACC Info Prefix: ${configuration.info.getPrefix}")

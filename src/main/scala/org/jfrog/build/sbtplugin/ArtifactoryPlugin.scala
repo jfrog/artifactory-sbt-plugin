@@ -43,13 +43,16 @@ object ArtifactoryPlugin extends AutoPlugin {
 
 	override def projectSettings: Seq[Setting[_]] = 
 	  Seq(
-        resolvers := {
+    //TODO: give the option to completely overwrite fullResolvers, or merely prepend artifactoryResolvers.
+    //TODO: look at: http://www.scala-sbt.org/0.13/docs/Proxy-Repositories.html and replace all resolvers based on ACC
+        fullResolvers := {
         	SbtExtractor.defineResolvers(artifactory.value.resolver) match {
-        		case Nil => resolvers.value
-        		case stuff => stuff
+        		case Nil => fullResolvers.value
+        		case stuff => stuff ++ fullResolvers.value  //This prepends our resolver first.  If we don't want to do this, leave out the fullResolvers.value
         	}
         },
         artifactoryRecordInfo :=  {
+          //TODO: doc this packagedArtifacts calls makePom if publishMavenStyle is true.  If publishMavenStyle is false, the pom isn't created.
         	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value, artifactory.value)
         },
         artifactoryPublish := (artifactoryPublish in Global).value,
@@ -71,7 +74,7 @@ object ArtifactoryPlugin extends AutoPlugin {
    //  A dynamic task which looks up the artifactoryRecordInfo task on ALL
    //  possible projects and joins the results together.
    lazy val recordAllTasksEverywhere = Def.taskDyn {
-   	  val refs = buildStructure.value.allProjectRefs  //It seems like possibly this line builds the pom file?
+   	  val refs = buildStructure.value.allProjectRefs
       //TODO: if we have a POM file should we be basing this on IVY or Maven?  what is the build structure like?
    	  joinAllExistingTasks(refs, artifactoryRecordInfo)
    }

@@ -66,36 +66,40 @@ object SbtExtractor {
     //report.configurations //configuration.details has the new model
     log.info(s"Org: ${moduleId.organization} name: ${moduleId.name} rev: ${moduleId.revision}")
     val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
-    val ddSeq: Seq[DeployDetails] = createDeployDetailsSeq(log, artifacts, configuration, moduleId)
-    val aModule: ArtifactoryModule = new ArtifactoryModule(module, ddSeq)
+    val ddIterate: Iterable[DeployDetails] = createDeployDetailsSeq(log, artifacts, configuration, moduleId)
+    val aModule: ArtifactoryModule = new ArtifactoryModule(module, ddIterate)
     if(aModule.deployableFiles.isEmpty)
       log.info(s"DeployableFiles is Empty")
-    else log.info(s"DeployableFiles is not Empty")
+    else printDD(ddIterate, log)
     aModule
   }
 
+  def printDD(ddIterate: Iterable[DeployDetails], log: sbt.Logger): Unit =
+  {
+    for(tempDD <- ddIterate) {
+    log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
+      s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
+    }
+  }
+
   def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File],
-                             configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): Seq[DeployDetails] = {
+                             configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): Iterable[DeployDetails] = {
     // TODO - Figure out what to do with extra file metadata.  Properties?
     // TODO - need to add build info fields, as per buildDeployDetails
     log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
-    var tempSeqDD: Seq[DeployDetails] = Seq.empty
     if(artifacts.nonEmpty) {
-      for (artf <- artifacts.keys) {
-        def fopt: Option[File] = artifacts.get(artf)
-        def f: File = fopt.get
-        log.info(s"ArtifactoryPlugInfo File: $f")
-        val checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
-        val myPath = calculateArtifactPath(configuration.publisher, moduleId, artf)
-        //val myPath = s"$f"
-        val tempDD: DeployDetails = new DeployDetails.Builder().file(f).targetRepository(configuration.publisher.getRepoKey).artifactPath(myPath).
+      def tempSeqDD: Iterable[DeployDetails] = for {
+        artf <- artifacts.keys
+        f: File = artifacts.get(artf).get
+        //      log.info(s"ArtifactoryPlugInfo File: $f")
+        checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
+        myPath = calculateArtifactPath(configuration.publisher, moduleId, artf)
+      //val myPath = s"$f"
+      } yield new DeployDetails.Builder().file(f).targetRepository(configuration.publisher.getRepoKey).artifactPath(myPath).
           md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
-        log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
-          s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
-        tempSeqDD = tempSeqDD :+ tempDD
-      }
+      tempSeqDD
     }
-    tempSeqDD
+    else null //TODO: I am supposed to be using option instead of returning null here?
   }
 
 
@@ -239,16 +243,11 @@ object SbtExtractor {
     val moduleName: String = moduleId.name
     val ext: String = artf.extension
     val artfType: String = artf.`type`
-    val branch = s"markg-dev-branch-dummy"
     val artifactPattern: String = getPattern(publisher, artfType)
-    val conf = s"dummyRELEASE"
     if (publisher.isM2Compatible) {
       organization = organization.replace(".", "/")
     }
     IvyPatternHelper.substitute(artifactPattern, organization, moduleName, revision, artf.name, artfType, ext)
- //   IvyPatternHelper.substitute(artifactPattern, organization, moduleName, branch, revision, artf.name, artfType, ext, conf, null, JavaConversions.mapAsJavaMap(artf.extraAttributes), null)
-    //TODO: Everything in the pattern is addressed except classifier.  Doesn't appear to be a use of classifier in the main ivy extractor either
-    //substitute(artifactPattern, organization, moduleName, branch, revision, artf.name, artfType, ext, artf.configurations, null, artf.extraAttributes, null)
   }
 
   def getPattern(pub: ArtifactoryClientConfiguration#PublisherHandler, typestring: String): String = {
@@ -274,6 +273,6 @@ object SbtExtractor {
 
 case class ArtifactoryModule(
                               module: Module,
-                              deployableFiles: Seq[DeployDetails]
+                              deployableFiles: Iterable[DeployDetails]
                               )
 

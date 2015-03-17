@@ -2,18 +2,15 @@ name := "sbt-artifactory"
 
 organization := "org.jfrog.buildinfo"
 
-version := "1.0-SNAPSHOT"
+version := "0.2"
 
 sbtPlugin := true
 
 resolvers := 
- ("jcenter" at "http://artifactory/artifactory") :: Nil
+ ("jcenter" at "http://localhost:8081/artifactory/jcenter") :: Nil
 
 libraryDependencies +=
-  "org.jfrog.buildinfo" % "build-info-extractor" % "2.3.3"
+  "org.jfrog.buildinfo" % "build-info-extractor" % "latest.release"
 
 libraryDependencies +=
   "org.jfrog.buildinfo" % "build-info-extractor-ivy" % "latest.release"
-
-libraryDependencies +=
-  "org.jfrog.buildinfo" % "build-info-extractor-gradle" % "latest.release"

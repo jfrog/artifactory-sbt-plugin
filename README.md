@@ -3,7 +3,7 @@ The SBT Plugin for Artifactory resolve and pulish
 
 What this tool (currently) doesn't do:
 
-1.) This plug-in is not yet production ready, it does not yet actually interact with artifactory
+1.) This plug-in is in an alpha state.  It does now interact with artifactory but has a lot of features to go.  See Roadmap.md for details
 
 What this tool does do:
 

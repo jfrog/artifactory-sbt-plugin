@@ -1,5 +1,5 @@
 # artifactory-sbt-plugin
-The SBT Plugin for Artifactory resolve and pulish
+The SBT Plugin for Artifactory resolve and publish
 
 What this tool (currently) doesn't do:
 

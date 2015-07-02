@@ -17,18 +17,22 @@ package org.jfrog.build.sbtplugin
 
 
 import org.apache.ivy.Ivy
-import org.jfrog.build.client.{ArtifactoryBuildInfoClient, ArtifactoryClientConfiguration, DeployDetails}
+import org.jfrog.build.client.DeployDetails
+import org.jfrog.build.extractor.clientConfiguration.client.ArtifactoryBuildInfoClient
+import org.jfrog.build.extractor.clientConfiguration.ArtifactoryClientConfiguration
 import org.jfrog.build.extractor.BuildInfoExtractorUtils
 
 //Provides details for deployment
 import org.jfrog.build.api.util.FileChecksumCalculator
 import sbt._
-import org.jfrog.build.api.Module  //Contains build module information
+import org.jfrog.build.api.{Agent, Build, BuildAgent, Module}
+
+//Contains build module information
 //import org.jfrog.build.api.util.DeployableFile  //markg: This would be a good way to do it, but build-info doesn't yet implement
 import java.io.File
-import org.jfrog.build.api.builder.ModuleBuilder
+import org.jfrog.build.api.builder.{BuildInfoBuilder, ModuleBuilder}
 import org.jfrog.build.extractor.BuildInfoExtractorUtils.getModuleIdString
-import java.util.Properties
+import java.util.{Date, Properties}
 //import org.jfrog.build.util.IvyResolverHandler
 import org.apache.ivy.core.IvyPatternHelper
 import scala.collection.JavaConversions
@@ -127,8 +131,18 @@ object SbtExtractor {
         log.info(s"BuildInfo: Publishing Detail ${detail.getArtifactPath}")
       }
     }
+    if(myACC.publisher.isPublishBuildInfo) {
+ //     myABIC.sendBuildInfo(???)
+    }
   }
 
+  def makeBuildInfo(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): Build = {
+    val buildName : String = if(configuration.info.getBuildName.isEmpty) "sbt-default" else configuration.info.getBuildName
+    val moduleList : List[Module] = null //TODO: need to fill this in now.
+    //val builder: BuildInfoBuilder = new BuildInfoBuilder(buildName).modules(moduleList).number("0").durationMillis(System.currentTimeMillis - ctx.getBuildStartTime).startedDate(new Date(ctx.getBuildStartTime)).buildAgent(new BuildAgent("Ivy", Ivy.getIvyVersion)).agent(new Agent("Ivy", Ivy.getIvyVersion))
+    //  builder.build
+    ???
+  }
   def makeACC(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): ArtifactoryClientConfiguration = {
     val props: Properties = new Properties
     props.putAll(System.getenv)

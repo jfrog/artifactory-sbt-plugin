@@ -8,7 +8,7 @@ What this tool (currently) doesn't do:
 What this tool does do:
 
 1.) Separate out the SBT artifacts and put them into the objects necessary to interact with the JFrog
-BuildInfo libraries in artifactory, with a properly calculated path
+BuildInfo libraries in artifactory, with a properly calculated path, and deploy the artifacts.
 
 2.) Lots and lots of debug statements printed out to the SBT shell so you can see what we're doing as we
 build/parse out the build info for deployment to artifactory

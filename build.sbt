@@ -10,7 +10,7 @@ resolvers :=
  ("jcenter" at "http://localhost:8081/artifactory/jcenter") :: Nil
 
 libraryDependencies +=
-  "org.jfrog.buildinfo" % "build-info-extractor" % "latest.release"
+  "org.jfrog.buildinfo" % "build-info-extractor" % "2.5.1"
 
 libraryDependencies +=
-  "org.jfrog.buildinfo" % "build-info-extractor-ivy" % "latest.release"
+  "org.jfrog.buildinfo" % "build-info-extractor-ivy" % "2.5.0"

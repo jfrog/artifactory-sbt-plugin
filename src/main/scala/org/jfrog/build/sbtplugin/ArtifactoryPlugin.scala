@@ -17,7 +17,7 @@ package  org.jfrog.build.sbtplugin
 
 import sbt._
 import sbt.Keys._
-import org.jfrog.build.client.ArtifactoryClientConfiguration
+import org.jfrog.build.extractor.clientConfiguration.ArtifactoryClientConfiguration
 import org.jfrog.build.api.{
 	Module,
 	Build,

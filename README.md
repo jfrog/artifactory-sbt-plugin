@@ -1,6 +1,18 @@
 # artifactory-sbt-plugin
 The SBT Plugin for Artifactory resolve and publish
 
+To install as a global plugin:
+```
+got to ~/.sbt/plugins/plugins.sbt
+
+lazy val sbtArtifactory = RootProject(file("/JFrogProds/scala-work/sbt-plugin/artifactory-sbt-plugin").toURI)
+
+lazy val buildProject = (
+  project.in(file(".")).
+  dependsOn(sbtArtifactory)
+)
+```
+
 What this tool (currently) doesn't do:
 
 1.) This plug-in is in an alpha state.  It does now interact with artifactory but has a lot of features to go.  See Roadmap.md for details

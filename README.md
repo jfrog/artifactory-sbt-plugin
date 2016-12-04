@@ -1,6 +1,8 @@
 # artifactory-sbt-plugin
 The SBT Plugin for Artifactory resolve and publish
 
+##This project is currently INACTIVE.  If you are interested in it please fork and improve!  If someone were to contribute back, JFrog could commit to testing it against every new release of artifactory.  Also if you have questions feel free to ask.
+
 To install as a global plugin:
 ```
 got to ~/.sbt/plugins/plugins.sbt

@@ -15,27 +15,30 @@
  */
 package org.jfrog.build.sbtplugin
 
-
+import org.apache.commons.lang3.StringUtils
 import org.apache.ivy.Ivy
-import org.jfrog.build.client.DeployDetails
-import org.jfrog.build.extractor.clientConfiguration.client.ArtifactoryBuildInfoClient
-import org.jfrog.build.extractor.clientConfiguration.ArtifactoryClientConfiguration
+import org.jfrog.build.extractor.BuildInfoExtractorUtils.getTypeString
+import org.jfrog.build.extractor.clientConfiguration.{ArtifactoryClientConfiguration, IncludeExcludePatterns, PatternMatcher}
 import org.jfrog.build.extractor.BuildInfoExtractorUtils
+import org.jfrog.build.extractor.ci.{Agent, BuildAgent, BuildInfo, BuildInfoFields, BuildInfoProperties, Dependency, Module}
+import org.jfrog.build.extractor.clientConfiguration.client.artifactory.ArtifactoryManager
+import org.jfrog.build.extractor.clientConfiguration.deploy.DeployDetails
+import org.jfrog.build.extractor.clientConfiguration.util.JsonUtils.toJsonString
 
-//Provides details for deployment
-import org.jfrog.build.api.util.FileChecksumCalculator
-import sbt._
-import org.jfrog.build.api.{Agent, Build, BuildAgent, Module}
+import java.text.{ParseException, SimpleDateFormat}
+import java.util
+import org.jfrog.build.api.util.{CommonUtils, FileChecksumCalculator}
+import sbt.*
 
-//Contains build module information
-//import org.jfrog.build.api.util.DeployableFile  //markg: This would be a good way to do it, but build-info doesn't yet implement
 import java.io.File
-import org.jfrog.build.api.builder.{BuildInfoBuilder, ModuleBuilder}
 import org.jfrog.build.extractor.BuildInfoExtractorUtils.getModuleIdString
+
 import java.util.{Date, Properties}
-//import org.jfrog.build.util.IvyResolverHandler
+import scala.jdk.CollectionConverters.*
 import org.apache.ivy.core.IvyPatternHelper
-import scala.collection.JavaConversions
+import org.jfrog.build.api.builder.ModuleType
+import org.jfrog.build.extractor.builder.{ArtifactBuilder, BuildInfoBuilder, DependencyBuilder, ModuleBuilder}
+import org.jfrog.build.extractor.retention.Utils
 
 /**
  * @author freds
@@ -44,249 +47,317 @@ import scala.collection.JavaConversions
 object SbtExtractor {
 
   def defineResolvers(resolverConf: ArtifactoryClientConfiguration#ResolverHandler): Seq[Resolver] = {
-    val url = resolverConf.getUrl
-    import org.apache.commons.lang.StringUtils
-    if (StringUtils.isNotBlank(url)) {
-      def betterUrl = resolverConf.urlWithMatrixParams(url)
-      def mavenRepo =
-        if (resolverConf.isMaven) Seq("artifactory-maven-resolver" at betterUrl)
-        else Nil
-      def ivyRepo =
+    Option(resolverConf.getUrl).filter(StringUtils.isNotBlank).fold[Seq[Resolver]](Nil) { url =>
+      val betterUrl = resolverConf.urlWithMatrixParams(url)
+      val mavenRepo =
+        if (resolverConf.isMaven) {
+          println("IS MAVEN")
+          Seq("artifactory-maven-resolver" at betterUrl)
+        } else Nil
+      val ivyRepo =
         if (resolverConf.isIvyRepositoryDefined) {
-          Seq(
-            Resolver.url("artifactory-ivy-resolver", sbt.url(betterUrl))(Patterns(resolverConf.getIvyArtifactPattern))
-          )
+          println("IS IVY")
+          Seq(Resolver.url("artifactory-ivy-resolver", sbt.url(betterUrl))(Patterns(resolverConf.getIvyArtifactPattern)))
         } else Nil
       mavenRepo ++ ivyRepo
     }
-    else Seq.empty
   }
 
   def extractModule(log: sbt.Logger, artifacts: Map[Artifact, File], report: UpdateReport, moduleId: ModuleID,
                     configuration: ArtifactoryClientConfiguration): ArtifactoryModule = {
     log.info(s"BuildInfo: extracting info for module $moduleId")
-  //TODO - UpdateReport contains the full graph, much more detailed than the POM, need from it.
-  //  log.info(s"ArtifactoryPluginInfo report: ${report}")
+    //TODO - UpdateReport contains the full graph, much more detailed than the POM, need from it.
+    //  log.info(s"ArtifactoryPluginInfo report: ${report}")
     //report.configurations //configuration.details has the new model
     log.info(s"Org: ${moduleId.organization} name: ${moduleId.name} rev: ${moduleId.revision}")
-    val module: Module = new ModuleBuilder().id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision)).build()
-    val ddIterate: Iterable[DeployDetails] = createDeployDetailsSeq(log, artifacts, configuration, moduleId)
-    val aModule: ArtifactoryModule = new ArtifactoryModule(module, ddIterate)
-    if(aModule.deployableFiles.isEmpty)
-      log.info(s"DeployableFiles is Empty")
-    else printDD(ddIterate, log)
-    aModule
+    log.info("---------------------")
+    //log.info(s"report: ${report.toSeq}")
+
+    val ddIterate = createDeployDetails(log, artifacts, configuration, moduleId)
+    val publisher = configuration.publisher // ConventionUtils.getPublisherHandler(project);
+
+    // TODO: Change from GENERIC to SBT once supported.
+    // TODO: add repository field
+    val moduleBuilder = new ModuleBuilder().`type`(ModuleType.GENERIC).id(getModuleIdString(moduleId.organization, moduleId.name, moduleId.revision))
+    moduleBuilder.dependencies(calculateDependencies(publisher, report).asJava)
+    // Extract the module's artifacts
+
+    // moduleBuilder.excludedArtifacts(calculateArtifacts(ProjectUtils.filterIncludeExcludeDetails(project, publisher, ddIterate, false)));
+    moduleBuilder.artifacts(calculateArtifacts(filterIncludeExcludeDetails(publisher, ddIterate, isInclude = true)).asJava)
+
+    ArtifactoryModule(moduleBuilder.build(), ddIterate)
   }
 
-  def printDD(ddIterate: Iterable[DeployDetails], log: sbt.Logger): Unit =
-  {
-    for(tempDD <- ddIterate) {
-    log.info(s"ArtifactoryPlugInfo DeployDetails: $tempDD file: ${tempDD.getFile} TargetRepo: ${tempDD.getTargetRepository}" +
-      s" ArtfPath: ${tempDD.getArtifactPath} md5: ${tempDD.getMd5} sha1: ${tempDD.getSha1}")
-    }
-  }
-
-  def createDeployDetailsSeq(log: sbt.Logger, artifacts: Map[Artifact, File],
-                             configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): Iterable[DeployDetails] = {
+  private def createDeployDetails(log: sbt.Logger, artifacts: Map[Artifact, File],
+                                  configuration: ArtifactoryClientConfiguration, moduleId: ModuleID): List[SbtDeployDetails] = {
     // TODO - Figure out what to do with extra file metadata.  Properties?
     // TODO - need to add build info fields, as per buildDeployDetails
     log.info(s"ArtifactoryPluginInfo Artifacts: $artifacts")
-    if(artifacts.nonEmpty) {
-      def tempSeqDD: Iterable[DeployDetails] = for {
-        artf <- artifacts.keys
-        f: File = artifacts.get(artf).get
-        //      log.info(s"ArtifactoryPlugInfo File: $f")
-        checksums: java.util.Map[String, String] = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
-        myPath = calculateArtifactPath(configuration.publisher, moduleId, artf)
-      //val myPath = s"$f"
-      } yield new DeployDetails.Builder().file(f).targetRepository(configuration.publisher.getRepoKey).artifactPath(myPath).
-          md5(checksums.get("md5")).sha1(checksums.get("sha1")).build()
-      tempSeqDD
-    }
-    else null //TODO: I am supposed to be using option instead of returning null here?
-  }
+    for {
+      (artifact, f) <- artifacts
+      checksums = FileChecksumCalculator.calculateChecksums(f, "md5", "sha1")
+      myPath = calculateArtifactPath(configuration.publisher, moduleId, artifact)
+    } yield SbtDeployDetails(new DeployDetails.Builder().file(f).targetRepository(configuration.publisher.getRepoKey).artifactPath(myPath).
+      md5(checksums.get("md5")).sha1(checksums.get("sha1")).build(), artifact)
+  }.toList
 
+  def publish(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, defaultProjectName: String, modules: Seq[ArtifactoryModule], defBIFile: File): Unit = {
 
-  def publish(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, modules: Seq[ArtifactoryModule]): Unit = {
-    // Publish
     //TODO: Compare with build-info-extractor-ivy ArtifactoryBuildListener.doDeploy() some configs are still not present (such as blackduck integration)
     val myACC = makeACC(log, configuration)
-    printACC(log, myACC)
-    val contextUrl = myACC.publisher.getContextUrl();
-    val username = myACC.publisher.getUsername();
-    val password = myACC.publisher.getPassword();
-    log.info(s"BuildInfo: Publishing ${modules.map (_.module.getId) mkString ", "}")
-    val myABIC: ArtifactoryBuildInfoClient = new ArtifactoryBuildInfoClient(contextUrl, username, password, myACC.getLog)
+    //    val contextUrl = myACC.publisher.getContextUrl
+    //    val username = myACC.publisher.getUsername
+    //    val password = myACC.publisher.getPassword
+    log.info(s"BuildInfo: Publishing ${modules.map(_.module.getId) mkString ", "}")
+    val myABIC: ArtifactoryManager = createArtifactoryManager(myACC.publisher)
+    //      new ArtifactoryManager(contextUrl, username, password, myACC.getLog)
     //TODO: skipping checks on isPublishArtifacts and isPublishBuildInfo we will assume they are true for now
     //TODO: Haven't really created a buildinfo yet, need to do that.
     //TODO: for now, skipping include/exclude patterns
     log.info(s"BuildInfo: Publishing based on ABIC ${myABIC.toString}")
-    for(module <- modules) {
+    for (module <- modules) {
       log.info(s"BuildInfo: Publishing Module ${module.module.getId}")
-      if(module.deployableFiles.isEmpty)
+      if (module.deployableFiles.isEmpty)
         log.info(s"DeployableFiles is Empty")
       else log.info(s"DeployableFiles is not Empty")
-      for(detail <- module.deployableFiles) {
-        myABIC.deployArtifact(detail)
-        log.info(s"BuildInfo: Publishing Detail ${detail.getArtifactPath}")
+      for (detail <- module.deployableFiles) {
+        myABIC.upload(detail.deployDetails)
+        log.info(s"BuildInfo: Publishing Detail ${detail.deployDetails.getArtifactPath}")
       }
     }
-    if(myACC.publisher.isPublishBuildInfo) {
- //     myABIC.sendBuildInfo(???)
+    val bi = makeBuildInfo(log, configuration, defaultProjectName, modules)
+    log.info("---------------------")
+    log.info(s"BI:   $bi")
+    log.info("---------------------")
+    log.info(s"Module:  ")
+    val m = bi.getModules.asScala.head
+    log.info(toJsonString(m))
+    log.info("---------------------")
+    exportBuildInfoToFileSystem(log, configuration, bi, defBIFile)
+    if (configuration.publisher.getContextUrl != null) {
+      //val artifactoryManager = myABIC//createArtifactoryManager(configuration.publisher)
+
+      // configureProxy(accRoot.proxy, artifactoryManager)
+      //  if (configuration.publisher.isPublishBuildInfo) {
+      log.info(s"Publishing build info to artifactory at: ${configuration.publisher.getContextUrl}")
+      Utils.sendBuildAndBuildRetention(myABIC, bi, configuration)
+      //   }
+      // exportDeployedArtifacts(accRoot, allDeployDetails)
+    }
+
+
+    if (myACC.publisher.isPublishBuildInfo) {
+      //     myABIC.sendBuildInfo(???)
     }
   }
 
-  def makeBuildInfo(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): Build = {
-    val buildName : String = if(configuration.info.getBuildName.isEmpty) "sbt-default" else configuration.info.getBuildName
-    val moduleList : List[Module] = null //TODO: need to fill this in now.
-    //val builder: BuildInfoBuilder = new BuildInfoBuilder(buildName).modules(moduleList).number("0").durationMillis(System.currentTimeMillis - ctx.getBuildStartTime).startedDate(new Date(ctx.getBuildStartTime)).buildAgent(new BuildAgent("Ivy", Ivy.getIvyVersion)).agent(new Agent("Ivy", Ivy.getIvyVersion))
-    //  builder.build
-    ???
+  private def createArtifactoryManager(publisher: ArtifactoryClientConfiguration#PublisherHandler) = {
+    val contextUrl = publisher.getContextUrl
+    var username = publisher.getUsername
+    var password = publisher.getPassword
+    if (StringUtils.isBlank(username)) username = ""
+    if (StringUtils.isBlank(password)) password = ""
+    new ArtifactoryManager(contextUrl, username, password, publisher.getLog)
   }
-  def makeACC(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): ArtifactoryClientConfiguration = {
+
+  //  private def getPropsToAdd(destination: ArtifactoryTask, artifact: Artifact, publicationName: String): util.Map[String, String] = {
+  //  //  val project: Project = destination.getProject
+  //    val propsToAdd: util.Map[String, String] = new util.HashMap[String, String]()//(destination.getDefaultProps)
+  //    // Apply artifact-specific props from the artifact specs
+  //    val spec: ArtifactSpec = ArtifactSpec.builder.configuration(publicationName).
+  //      group(project.getGroup.toString).
+  //      name(project.getName).
+  //      version(project.getVersion.toString).
+  //      classifier(artifact.classifier.getOrElse("")).`type`(artifact.`type`).build
+  //    val artifactSpecsProperties: Multimap[String, CharSequence] = destination.artifactSpecs.getProperties(spec)
+  //    addProps(propsToAdd, artifactSpecsProperties)
+  //    propsToAdd
+  //  }
+
+
+  private def makeBuildInfo(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, defaultProjectName: String, modules: Seq[ArtifactoryModule]): BuildInfo = {
+    var buildName = configuration.info.getBuildName
+    if (StringUtils.isBlank(buildName)) {
+      buildName = defaultProjectName
+      configuration.info.setBuildName(buildName)
+    }
+    //   config.publisher.setMatrixParam(BuildInfoFields.BUILD_NAME, buildName)
+
+    // Build number// Build number
+    var buildNumber = configuration.info.getBuildNumber
+    if (StringUtils.isBlank(buildNumber)) {
+      buildNumber = new Date().getTime + ""
+      configuration.info.setBuildNumber(buildNumber)
+    }
+    val bib = new BuildInfoBuilder(configuration.info.getBuildName).number(configuration.info.getBuildNumber).
+      project(configuration.info.getProject).modules(modules.map(_.module).asJava).startedDate(populateBuilderDateTimeFields(log, configuration)).
+      buildAgent(new BuildAgent("Ivy", Ivy.getIvyVersion)).
+      agent(new Agent("Ivy", Ivy.getIvyVersion))
+    bib.build
+    //    val buildName: String = if (StringUtils.isBlank(configuration.info.getBuildName)) "sbt-default" else configuration.info.getBuildName
+    /*
+    populateBuilderModulesFields(bib);
+
+            // Run Parameters (Properties)
+            for (Map.Entry<String, String> runParam : clientConf.info.getRunParameters().entrySet()) {
+                MatrixParameter matrixParameter = new MatrixParameter(runParam.getKey(), runParam.getValue());
+                bib.addRunParameters(matrixParameter);
+            }
+
+            // Other Meta Data
+            populateBuilderAgentFields(bib);
+            populateBuilderParentFields(bib);
+            populateBuilderArtifactoryPluginVersionField(bib);
+
+            Date buildStartDate = populateBuilderDateTimeFields(bib);
+            String principal = populateBuilderPrincipalField(bib);
+            String artifactoryPrincipal = populateBuilderArtifactoryPrincipalField(bib);
+
+            // Other services information
+            populateBuilderPromotionFields(bib, buildStartDate, principal, artifactoryPrincipal);
+            populateBuilderVcsFields(bib);
+            populateBuilderIssueTrackerFields(bib);
+     */
+    //    val builder: BuildInfoBuilder = new BuildInfoBuilder(buildName).modules(modules.map(_.module).asJava).
+    //      number("0").
+    // durationMillis(System.currentTimeMillis - ctx.getBuildStartTime).
+
+  }
+
+  private def populateBuilderDateTimeFields(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): Date = {
+    val buildStartedIso = configuration.info.getBuildStarted
+    var buildStartDate: Date = null
+    try {
+      buildStartDate = new SimpleDateFormat(BuildInfo.STARTED_FORMAT).parse(buildStartedIso)
+    } catch {
+      case e: ParseException => log.info("Build start date format error: " + buildStartedIso + " " + e.getMessage)
+    }
+    //    val durationMillis = if (buildStartDate != null) System.currentTimeMillis() - buildStartDate.getTime else 0
+
+    buildStartDate
+  }
+  
+  private def makeACC(log: sbt.Logger,configuration: ArtifactoryClientConfiguration): ArtifactoryClientConfiguration = {
     val props: Properties = new Properties
-    props.putAll(System.getenv)
-    val myProps = BuildInfoExtractorUtils.mergePropertiesWithSystemAndPropertyFile(props, configuration.getLog)
-    configuration.fillFromProperties(myProps)
+    props.putAll(System.getenv.asInstanceOf[java.util.Map[?, ?]])
+
+    val mergedProps = BuildInfoExtractorUtils.mergePropertiesWithSystemAndPropertyFile(props, configuration.getLog)
+
+    val buildInfoProps: java.util.Map[?,?] =
+      BuildInfoExtractorUtils.stripPrefixFromProperties(BuildInfoExtractorUtils.filterDynamicProperties(mergedProps, BuildInfoExtractorUtils.BUILD_INFO_PROP_PREDICATE), BuildInfoProperties.BUILD_INFO_PROP_PREFIX)
+    mergedProps.putAll(buildInfoProps)
+
+    // Add the properties to the Artifactory client configuration.
+    // In case the build name and build number have already been added to the configuration
+    // from inside the gradle script, we do not want to override them by the values sent from
+    // the CI server plugin.
+    val prefix = BuildInfoProperties.BUILD_INFO_PREFIX
+    val excludeIfExist = CommonUtils.newHashSet(prefix + BuildInfoFields.BUILD_NUMBER, prefix + BuildInfoFields.BUILD_NAME, prefix + BuildInfoFields.BUILD_STARTED)
+    configuration.fillFromProperties(mergedProps, excludeIfExist);
+
     configuration
   }
 
-  def printACC(log: sbt.Logger, configuration: ArtifactoryClientConfiguration): Unit = {
-    log.info(s"ArtifactoryClientConfig: $configuration")
-    log.info(s"ArtifactoryClientConfig Base Values:")
-    log.info(s"ACC AllProperties: ${configuration.getAllProperties}")
-    log.info(s"ACC AllRootConfig: ${configuration.getAllRootConfig}")
-    log.info(s"ACC EnvVarsExcludePatterns: ${configuration.getEnvVarsExcludePatterns}")
-    log.info(s"ACC EnvVarsIncludePatterns: ${configuration.getEnvVarsIncludePatterns}")
-    log.info(s"ACC ExportFile: ${configuration.getExportFile}")
-    log.info(s"ACC Log: ${configuration.getLog}")
-    log.info(s"ACC PropertiesFile: ${configuration.getPropertiesFile}")
-    log.info(s"ACC Timeout: ${configuration.getTimeout}")
-    log.info(s"ArtifactoryClientConfig Resolver Values:")
-    log.info(s"ArtifactoryClientConfig resolver: ${configuration.resolver}")
-    log.info(s"ACC Resolver booleans:")
-    log.info(s"ACC Resolver isIvyRepositoryDefined: ${configuration.resolver.isIvyRepositoryDefined}")
-    log.info(s"ACC Resolver isIvy: ${configuration.resolver.isIvy}")
-    log.info(s"ACC Resolver isM2Compatible: ${configuration.resolver.isM2Compatible}")
-    log.info(s"ACC Resolver isMaven: ${configuration.resolver.isMaven}")
-    log.info(s"ACC Resolver values:")
-    log.info(s"ACC Resolver BuildRoot: ${configuration.resolver.getBuildRoot}")
-    log.info(s"ACC Resolver ContextURL: ${configuration.resolver.getContextUrl}") //TODO: this needs to be defined in build.sbt as per readme, should we do something with initialization?
-    log.info(s"ACC Resolver DownloadSnapshotRepoKey: ${configuration.resolver.getDownloadSnapshotRepoKey}")
-    log.info(s"ACC Resolver DownloadURL: ${configuration.resolver.getDownloadUrl}")
-    log.info(s"ACC Resolver MatrixParamPrefix: ${configuration.resolver.getMatrixParamPrefix}")
-    log.info(s"ACC Resolver IvyArtifactPattern: ${configuration.resolver.getIvyArtifactPattern}")
-    log.info(s"ACC Resolver IvyPattern: ${configuration.resolver.getIvyPattern}")
-    log.info(s"ACC Resolver Log: ${configuration.resolver.getLog}")
-    log.info(s"ACC Resolver MatrixParams: ${configuration.resolver.getMatrixParams}")
-    log.info(s"ACC Resolver Name: ${configuration.resolver.getName}")
-    log.info(s"ACC Resolver Password: ${configuration.resolver.getPassword}")
-    log.info(s"ACC Resolver Prefix: ${configuration.resolver.getPrefix}")
-    log.info(s"ACC Resolver RepoKey: ${configuration.resolver.getRepoKey}")
-    log.info(s"ACC Resolver URL: ${configuration.resolver.getUrl}")
-    log.info(s"ACC Resolver URLwithMatrixParams: ${configuration.resolver.getUrlWithMatrixParams}")
-    log.info(s"ACC Resolver Username: ${configuration.resolver.getUsername}")
-    log.info(s"ArtifactoryClientConfiguration Publisher publisher Values:")
-    log.info(s"ACC Publisher publisher: ${configuration.publisher}")
-    log.info(s"ACC publisher booleans:")
-    log.info(s"ACC Publisher isCopyAggregatedArtifacts: ${configuration.publisher.isCopyAggregatedArtifacts}")
-    log.info(s"ACC Publisher isEvenUnstable: ${configuration.publisher.isEvenUnstable}")
-    log.info(s"ACC Publisher isFilterExcludedArtifactsFromBuild: ${configuration.publisher.isFilterExcludedArtifactsFromBuild}")
-    log.info(s"ACC Publisher isPublishAggregatedArtifacts: ${configuration.publisher.isPublishAggregatedArtifacts}")
-    log.info(s"ACC Publisher isPublishArtifacts: ${configuration.publisher.isPublishArtifacts}")
-    log.info(s"ACC Publisher isPublishBuildInfo: ${configuration.publisher.isPublishBuildInfo}")
-    log.info(s"ACC Publisher isRecordAllDependencies: ${configuration.publisher.isRecordAllDependencies}")
-    log.info(s"ACC Publisher isIvy: ${configuration.publisher.isIvy}")
-    log.info(s"ACC Publisher isM2Compatible: ${configuration.publisher.isM2Compatible}")
-    log.info(s"ACC Publisher isMaven: ${configuration.publisher.isMaven}")
-    log.info(s"ACC publisher values:")
-    log.info(s"ACC Publisher AggregateArtifacts: ${configuration.publisher.getAggregateArtifacts}")
-    log.info(s"ACC Publisher ArtifactSpecs: ${configuration.publisher.getArtifactSpecs}")
-    log.info(s"ACC Publisher BuildRoot: ${configuration.publisher.getBuildRoot}")
-    log.info(s"ACC Publisher ContextURL: ${configuration.publisher.getContextUrl}") //TODO: this needs to be defined in build.sbt as per readme, should we do something with initialization?
-    log.info(s"ACC Publisher getExcludePatterns: ${configuration.publisher.getExcludePatterns}")
-    log.info(s"ACC Publisher getIncludePatterns: ${configuration.publisher.getIncludePatterns}")
-    log.info(s"ACC Publisher MatrixParamPrefix: ${configuration.publisher.getMatrixParamPrefix}")
-    log.info(s"ACC Publisher SnapshotRepoKey: ${configuration.publisher.getSnapshotRepoKey}")
-    log.info(s"ACC Publisher IvyArtifactPattern: ${configuration.publisher.getIvyArtifactPattern}")
-    log.info(s"ACC Publisher IvyPattern: ${configuration.publisher.getIvyPattern}")
-    log.info(s"ACC Publisher Log: ${configuration.publisher.getLog}")
-    log.info(s"ACC Publisher MatrixParams: ${configuration.publisher.getMatrixParams}")
-    log.info(s"ACC Publisher Name: ${configuration.publisher.getName}")
-    log.info(s"ACC Publisher Password: ${configuration.publisher.getPassword}")
-    log.info(s"ACC Publisher Prefix: ${configuration.publisher.getPrefix}")
-    log.info(s"ACC Publisher RepoKey: ${configuration.publisher.getRepoKey}")
-    log.info(s"ACC Publisher URL: ${configuration.publisher.getUrl}")
-    log.info(s"ACC Publisher URLwithMatrixParams: ${configuration.publisher.getUrlWithMatrixParams}")
-    log.info(s"ACC Publisher Username: ${configuration.publisher.getUsername}")
-    log.info(s"ArtifactoryClientConfiguration BuildInfo Stuff:")
-    log.info(s"ArtifactoryClientConfiguration BuildInfo: ${configuration.info}")
-    log.info(s"ACC Info booleans: ")
-    log.info(s"ACC Info isDeleteBuildArtifacts: ${configuration.info.isDeleteBuildArtifacts}")
-    log.info(s"ACC Info isReleaseEnabled: ${configuration.info.isReleaseEnabled}")
-    log.info(s"ACC Info values: ")
-    log.info(s"ACC Info AgentName: ${configuration.info.getAgentName}")
-    log.info(s"ACC Info AgentVersion: ${configuration.info.getAgentVersion}")
-    log.info(s"ACC Info BuildAgentName: ${configuration.info.getBuildAgentName}")
-    log.info(s"ACC Info BuildAgentVersion: ${configuration.info.getBuildAgentVersion}")
-    log.info(s"ACC Info BuildName: ${configuration.info.getBuildName}")
-    log.info(s"ACC Info BuildNumber: ${configuration.info.getBuildNumber}")
-    log.info(s"ACC Info BuildNumbersNotToDelete: ${configuration.info.getBuildNumbersNotToDelete}")
-    log.info(s"ACC Info BuildRetentionCount: ${configuration.info.getBuildRetentionCount}")
-    log.info(s"ACC Info BuildRetentionDays: ${configuration.info.getBuildRetentionDays}")
-    log.info(s"ACC Info BuildRetentionMinimumDate: ${configuration.info.getBuildRetentionMinimumDate}")
-    log.info(s"ACC Info BuildRoot: ${configuration.info.getBuildRoot}")
-    log.info(s"ACC Info BuildStarted: ${configuration.info.getBuildStarted}")
-    log.info(s"ACC Info BuildTimestamp: ${configuration.info.getBuildTimestamp}")
-    log.info(s"ACC Info BuildURL: ${configuration.info.getBuildUrl}")
-    log.info(s"ACC Info ParentBuildName: ${configuration.info.getParentBuildName}")
-    log.info(s"ACC Info ParentBuildNumber: ${configuration.info.getParentBuildNumber}")
-    log.info(s"ACC Info Principal: ${configuration.info.getPrincipal}")
-    log.info(s"ACC Info ReleaseComment: ${configuration.info.getReleaseComment}")
-    log.info(s"ACC Info RunParameters: ${configuration.info.getRunParameters}")
-    log.info(s"ACC Info VcsRevision: ${configuration.info.getVcsRevision}") //TODO: get this from the gitPlugin, will need a second plugin to write just this info when gitPlugin is present
-    log.info(s"ACC Info VcsUrl: ${configuration.info.getVcsUrl}")
-    log.info(s"ACC Info Log: ${configuration.info.getLog}")
-    log.info(s"ACC Info Prefix: ${configuration.info.getPrefix}")
-  }
-
-  def calculateArtifactPath (publisher: ArtifactoryClientConfiguration#PublisherHandler, moduleId: ModuleID, artf: Artifact): String = {
+  private def calculateArtifactPath(publisher: ArtifactoryClientConfiguration#PublisherHandler, moduleId: ModuleID, artf: Artifact): String = {
     //attributes: Map[String, String], extraAttributes: Map[String, String]
-    var organization: String = moduleId.organization
-    val revision: String = moduleId.revision
-    val moduleName: String = moduleId.name
-    val ext: String = artf.extension
+    val organization = if (publisher.isM2Compatible) {
+      moduleId.organization.replace(".", "/")
+    } else {
+      moduleId.organization
+    }
+
     val artfType: String = artf.`type`
     val artifactPattern: String = getPattern(publisher, artfType)
-    if (publisher.isM2Compatible) {
-      organization = organization.replace(".", "/")
-    }
-    IvyPatternHelper.substitute(artifactPattern, organization, moduleName, revision, artf.name, artfType, ext)
+    val extraTokens = new util.HashMap[String, String]
+    artf.classifier.filter(StringUtils.isNotBlank).foreach(extraTokens.put("classifier", _))
+    IvyPatternHelper.substitute(artifactPattern, organization, moduleId.name, moduleId.revision, artf.name, artfType, artf.extension, "XXXX"
+      , extraTokens, null)
   }
 
-  def getPattern(pub: ArtifactoryClientConfiguration#PublisherHandler, typestring: String): String = {
-    if (isIvy(typestring) )
-    {
-      pub.getIvyPattern
-    } else
-    {
-      pub.getIvyArtifactPattern
+  private def getPattern(pub: ArtifactoryClientConfiguration#PublisherHandler, typestring: String): String =
+    if (typestring == "Ivy") pub.getIvyPattern else pub.getIvyArtifactPattern
+
+  private def calculateArtifacts(deployDetails: List[SbtDeployDetails]) = {
+    deployDetails.map { case SbtDeployDetails(dd, art) =>
+      val artifactPath = dd.getArtifactPath
+      new ArtifactBuilder(artifactPath.substring(artifactPath.lastIndexOf('/') + 1)).`type`(
+        getTypeString(art.`type`, art.classifier.getOrElse(""), art.extension)
+      )
+        .md5(dd.getMd5)
+        .sha1(dd.getSha1)
+        .sha256(dd.getSha256)
+        .remotePath(artifactPath).build()
     }
   }
 
-  def isIvy(typestring: String): Boolean = {
-    if (typestring.isEmpty)
-    {
-      false
+  // TODO: support include/exclude
+  def filterIncludeExcludeDetails(publisher: ArtifactoryClientConfiguration#PublisherHandler, deployDetails: List[SbtDeployDetails],
+                                  isInclude: Boolean): List[SbtDeployDetails] = {
+    val patterns = new IncludeExcludePatterns(publisher.getIncludePatterns, publisher.getExcludePatterns)
+    if (publisher.isFilterExcludedArtifactsFromBuild) {
+      deployDetails.filter { dd =>
+        if (isInclude) {
+          !PatternMatcher.pathConflicts(dd.deployDetails.getArtifactPath, patterns)
+        }
+        PatternMatcher.pathConflicts(dd.deployDetails.getArtifactPath, patterns)
+      }
+    } else {
+      if (isInclude) deployDetails.filter {
+        dd =>
+          if (dd == null)
+            false
+          true // TODO: filter on project??  dd.getProject().equals(project);
+      } else Nil
+
     }
-    else {
-      typestring.equals(s"Ivy")
+  }
+
+  private def calculateDependencies(publisher: ArtifactoryClientConfiguration#PublisherHandler, report: UpdateReport): List[Dependency] = {
+    import org.jfrog.build.api.util.FileChecksumCalculator.*
+    // TODO: will try to group by moduleId+artifact+file to be on the safe side, not sure when they combine differently
+    report.toSeq.groupBy {
+      case (_, moduleId, artifact, file) => (moduleId, artifact, file)
+    }.mapValues(_.map(_._1))
+      .map {
+        case ((moduleId, artifact, file), scopes) =>
+          val depId = s"${moduleId.organization}:${moduleId.name}:${moduleId.revision}"
+          // configRef is the compile/runtime/test/etc...
+          val dependencyBuilder = new DependencyBuilder().id(depId)
+            .scopes(scopes.map(_.name).toSet.asJava)
+          /*if (requestedByMap != null) {
+            dependencyBuilder.requestedBy(requestedByMap.get(depId));
+          }*/
+
+          val checksums = FileChecksumCalculator.calculateChecksums(file, MD5_ALGORITHM, SHA1_ALGORITHM, SHA256_ALGORITHM)
+          dependencyBuilder.md5(checksums.get(MD5_ALGORITHM)).
+            sha1(checksums.get(SHA1_ALGORITHM)).
+            sha256(checksums.get(SHA256_ALGORITHM))
+
+          dependencyBuilder.build()
+      }.toList
+  }
+
+  private def exportBuildInfoToFileSystem(log: sbt.Logger, configuration: ArtifactoryClientConfiguration, buildInfo: BuildInfo, defBIFile: File): Unit = {
+    exportBuildInfo(log, buildInfo, getExportFile(configuration, defBIFile))
+
+    if (!StringUtils.isEmpty(configuration.info.getGeneratedBuildInfoFilePath)) {
+      exportBuildInfo(log, buildInfo, new File(configuration.info.getGeneratedBuildInfoFilePath))
     }
+  }
+
+  private def getExportFile(clientConf: ArtifactoryClientConfiguration, defBIFile: File): File = {
+    // Configured path
+    val fileExportPath = clientConf.getExportFile
+    if (StringUtils.isNotBlank(fileExportPath)) new File(fileExportPath) else defBIFile
+
+  }
+
+  private def exportBuildInfo(log: sbt.Logger, buildInfo: BuildInfo, toFile: File): Unit = {
+    log.log(Level.Info, s"Exporting generated build info to ${toFile.getAbsolutePath}")
+    BuildInfoExtractorUtils.saveBuildInfoToFile(buildInfo, toFile)
   }
 }
 
-case class ArtifactoryModule(
-                              module: Module,
-                              deployableFiles: Iterable[DeployDetails]
-                              )
+case class ArtifactoryModule(module: Module, deployableFiles: Iterable[SbtDeployDetails])
 
+case class SbtDeployDetails(deployDetails: DeployDetails, artifact: Artifact)

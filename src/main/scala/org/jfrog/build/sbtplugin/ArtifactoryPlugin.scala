@@ -18,27 +18,21 @@ package  org.jfrog.build.sbtplugin
 import sbt._
 import sbt.Keys._
 import org.jfrog.build.extractor.clientConfiguration.ArtifactoryClientConfiguration
-import org.jfrog.build.api.{
-	Module,
-	Build,
-	Artifact,
-	Dependency
-}
-import org.jfrog.build.api.util.{
-	NullLog,
-	DeployableFile
-}
+import org.jfrog.build.api.util.NullLog
 
 object ArtifactoryKeys {
-	val artifactory = settingKey[ArtifactoryClientConfiguration]("An api to collect/store published artifact information.")
+	val artifactory = settingKey[ArtifactoryClientConfiguration]("An API to collect/store published artifact information.")
 	val artifactoryRecordInfo = taskKey[ArtifactoryModule]("") //TODO: provide a description of this
-	val artifactoryPublish = taskKey[Unit]("publishing all files to artifactory.")
+	val artifactoryPublish = taskKey[Unit]("Publishing all files to artifactory.")
 }
 
 import ArtifactoryKeys._
 object ArtifactoryPlugin extends AutoPlugin {
 	override def trigger = allRequirements
-	override def requires = sbt.plugins.IvyPlugin
+	/*override def requires = {
+		println("XXXXXXXXXXXXXXXXX")
+		sbt.plugins.IvyPlugin
+	}*/
 	val autoImport = ArtifactoryKeys
 
 	override def projectSettings: Seq[Setting[_]] = 
@@ -46,17 +40,15 @@ object ArtifactoryPlugin extends AutoPlugin {
     //TODO: give the option to completely overwrite fullResolvers, or merely prepend artifactoryResolvers.
     //TODO: look at: http://www.scala-sbt.org/0.13/docs/Proxy-Repositories.html and replace all resolvers based on ACC
         fullResolvers := {
-        	SbtExtractor.defineResolvers(artifactory.value.resolver) match {
-        		case Nil => fullResolvers.value
-        		case stuff => stuff ++ fullResolvers.value  //This prepends our resolver first.  If we don't want to do this, leave out the fullResolvers.value
-        	}
+					//This prepends our resolver first.  If we don't want to do this, leave out the fullResolvers.value
+        	SbtExtractor.defineResolvers(artifactory.value.resolver)  ++ fullResolvers.value
         },
         artifactoryRecordInfo :=  {
           //TODO: doc this packagedArtifacts calls makePom if publishMavenStyle is true.  If publishMavenStyle is false, the pom isn't created.
         	SbtExtractor.extractModule(streams.value.log, packagedArtifacts.value, update.value, projectID.value, artifactory.value)
         },
         artifactoryPublish := (artifactoryPublish in Global).value,
-        aggregate in artifactoryPublish := false
+        aggregate / artifactoryPublish := false
 	  )
 
 	override def globalSettings: Seq[Setting[_]] =
@@ -67,7 +59,9 @@ object ArtifactoryPlugin extends AutoPlugin {
 	  		config
 	  	},
 	  	artifactoryPublish := {
-	  		SbtExtractor.publish(streams.value.log, artifactory.value, recordAllTasksEverywhere.value)
+				val defaultBIFile = new File((ThisBuild / baseDirectory).value.absolutePath, "build-info.json")
+				val defaultProjectName = "sbt-default"
+	  		SbtExtractor.publish(streams.value.log, artifactory.value,defaultProjectName,  recordAllTasksEverywhere.value, defaultBIFile)
 	  	}
 	  )
 
